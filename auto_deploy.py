@@ -51,18 +51,32 @@ else
 fi
 
 # Install dependencies
-sudo -u masha bash << 'VENV_SETUP'
-cd /opt/masha-osint
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip -q
-pip install -r requirements.txt -q
-VENV_SETUP
+echo "📦 Installing dependencies..."
+chown -R masha:masha /opt/masha-osint
+
+sudo -u masha python3 -m venv /opt/masha-osint/venv --clear
+sudo -u masha /opt/masha-osint/venv/bin/pip install --upgrade pip
+sudo -u masha /opt/masha-osint/venv/bin/pip install streamlit==1.40.0
+sudo -u masha /opt/masha-osint/venv/bin/pip install -r /opt/masha-osint/requirements.txt
+
+mkdir -p /opt/masha-osint/logs /opt/masha-osint/data
+chown -R masha:masha /opt/masha-osint
 
 # Create .env if not exists
 if [ ! -f "/opt/masha-osint/.env" ]; then
-    sudo -u masha cp /opt/masha-osint/.env.example /opt/masha-osint/.env
-    sudo -u masha chmod 600 /opt/masha-osint/.env
+    sudo -u masha bash << 'ENV_CREATE'
+cat > /opt/masha-osint/.env << 'EOF'
+# Masha OSINT - Environment Configuration
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SERPAPI_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+RAPIDAPI_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DEEPSEEK_MODEL=deepseek-reasoner
+MASHA_WEB_PASSWORD=CHANGE_THIS_PASSWORD
+MASHA_USE_LOCAL_CNPJ_DB=false
+EOF
+chmod 600 /opt/masha-osint/.env
+ENV_CREATE
+    echo "⚠️  IMPORTANT: Configure API keys in /opt/masha-osint/.env"
 fi
 
 # Create systemd service
@@ -80,9 +94,6 @@ EnvironmentFile=/opt/masha-osint/.env
 ExecStart=/opt/masha-osint/venv/bin/streamlit run app.py --server.port=8501 --server.address=127.0.0.1 --server.headless=true --server.enableCORS=false
 Restart=always
 RestartSec=10
-NoNewPrivileges=true
-PrivateTmp=true
-ReadWritePaths=/opt/masha-osint/logs /opt/masha-osint/data
 
 [Install]
 WantedBy=multi-user.target
@@ -117,7 +128,45 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
 # Get SSL certificate
-certbot --nginx -d masha.freirecorporation.com --non-interactive --agree-tos --email admin@freirecorporation.com --redirect || true
+certbot --nginx -d masha.freirecorporation.com --non-interactive --agree-tos --email admin@freirecorporation.com --redirect || {
+    echo "Getting certificate only..."
+    certbot certonly --webroot -w /var/www/html -d masha.freirecorporation.com --non-interactive --agree-tos --email admin@freirecorporation.com || true
+}
+
+# Update Nginx with HTTPS if certificate exists
+if [ -f /etc/letsencrypt/live/masha.freirecorporation.com/fullchain.pem ]; then
+    cat > /etc/nginx/sites-available/masha-osint << 'EOF'
+upstream streamlit_backend {
+    server 127.0.0.1:8501 fail_timeout=0;
+}
+
+server {
+    listen 80;
+    server_name masha.freirecorporation.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name masha.freirecorporation.com;
+
+    ssl_certificate /etc/letsencrypt/live/masha.freirecorporation.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/masha.freirecorporation.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    location / {
+        proxy_pass http://streamlit_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_buffering off;
+    }
+}
+EOF
+    nginx -t && systemctl reload nginx
+fi
 
 # Configure Streamlit
 mkdir -p /opt/masha-osint/.streamlit
