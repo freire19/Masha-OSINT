@@ -1,8 +1,51 @@
+# Python
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# CRITICAL - Secrets (DO NOT COMMIT)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets.toml
+.streamlit/secrets.toml
+
+# Application data
 logs/
 downloads/
 data/
-.env
-.streamlit/secrets.toml
+*.db
+*.sqlite3
+
+# Tests
+.coverage
+.coveragerc
+coverage.json
+htmlcov/
+.pytest_cache/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+site/
+*.log
